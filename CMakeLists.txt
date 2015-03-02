@@ -38,6 +38,8 @@ add_executable(${EXECUTABLE_NAME}
 	src/arkanoid.h
 	src/tilemap.cpp
 	src/tilemap.h
+	src/ecs.cpp
+	src/ecs.h
 	src/main.cpp
 )
 
@@ -49,6 +51,7 @@ find_package(SFML 2 REQUIRED system window graphics network audio)
 if(SFML_FOUND)
 	include_directories(${CMAKE_SOURCE_DIR}/prefix/include)
 	target_link_libraries(${EXECUTABLE_NAME}
+		${CMAKE_SOURCE_DIR}/prefix/lib/libentityx-d.a
 		${CMAKE_SOURCE_DIR}/prefix/lib/libsfml-audio-d.dylib 
 		${CMAKE_SOURCE_DIR}/prefix/lib/libsfml-graphics-d.dylib 
 		${CMAKE_SOURCE_DIR}/prefix/lib/libsfml-network-d.dylib 
