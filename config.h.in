@@ -1,0 +1,3 @@
+#define VERSION_MAJOR @arykow_VERSION_MAJOR@
+#define VERSION_MINOR @arykow_VERSION_MINOR@
+#define DATA_PATH "@arykow_DATA_PATH@"
