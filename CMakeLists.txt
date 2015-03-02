@@ -36,6 +36,8 @@ set(EXECUTABLE_NAME "arykow")
 add_executable(${EXECUTABLE_NAME}
 	src/arkanoid.cpp
 	src/arkanoid.h
+	src/tilemap.cpp
+	src/tilemap.h
 	src/main.cpp
 )
 
