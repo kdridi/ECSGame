@@ -44,13 +44,6 @@ using std::endl;
 
 namespace ex = entityx;
 
-namespace std {
-    template <>
-    struct hash<ex::Entity> {
-        std::size_t operator()(const ex::Entity& k) const { return k.id().id(); }
-    };
-}
-
 
 float r(int a, float b = 0) {
     return static_cast<float>(std::rand() % (a * 1000) + b * 1000) / 1000.0;
@@ -59,25 +52,23 @@ float r(int a, float b = 0) {
 
 struct Body {
     Body(const sf::Vector2f &position, const sf::Vector2f &direction, float rotationd = 0.0)
-    : position(position), direction(direction), rotationd(rotationd) {}
+    : position(position), direction(direction), rotationd(rotationd), alpha(0.0) {}
     
     sf::Vector2f position;
     sf::Vector2f direction;
-    float rotation = 0.0, rotationd;
+    float rotation = 0.0, rotationd, alpha;
 };
 
 
-struct Renderable {
-    explicit Renderable(std::unique_ptr<sf::Shape> shape) : shape(std::move(shape)) {}
-    
-    std::unique_ptr<sf::Shape> shape;
-};
+using Renderable = std::shared_ptr<sf::Shape>;
 
 
-struct Fadeable {
-    explicit Fadeable(sf::Uint8 alpha, float duration) : alpha(alpha), d(alpha / duration) {}
+struct Particle {
+    explicit Particle(sf::Color colour, float radius, float duration)
+    : colour(colour), radius(radius), alpha(colour.a), d(colour.a / duration) {}
     
-    float alpha, d;
+    sf::Color colour;
+    float radius, alpha, d;
 };
 
 
@@ -96,35 +87,50 @@ struct CollisionEvent {
 };
 
 
-// Updates a body's position and rotation.
-struct BodySystem : public ex::System<BodySystem> {
+class SpawnSystem : public ex::System<SpawnSystem> {
+public:
+    explicit SpawnSystem(sf::RenderTarget &target, int count) : size(target.getSize()), count(count) {}
+    
     void update(ex::EntityManager &es, ex::EventManager &events, ex::TimeDelta dt) override {
-        ex::ComponentHandle<Body> body;
-        for (ex::Entity entity : es.entities_with_components(body)) {
-            body->position += body->direction * static_cast<float>(dt);
-            body->rotation += body->rotationd * dt;
+        int c = 0;
+        ex::ComponentHandle<Collideable> collideable;
+        es.each<Collideable>([&](ex::Entity entity, Collideable&) { ++c; });
+        
+        for (int i = 0; i < count - c; i++) {
+            ex::Entity entity = es.create();
+            
+            // Mark as collideable (explosion particles will not be collideable).
+            collideable = entity.assign<Collideable>(r(10, 5));
+            
+            // "Physical" attributes.
+            entity.assign<Body>(
+                                sf::Vector2f(r(size.x), r(size.y)),
+                                sf::Vector2f(r(100, -50), r(100, -50)));
+            
+            // Shape to apply to entity.
+            Renderable shape(new sf::CircleShape(collideable->radius));
+            shape->setFillColor(sf::Color(r(128, 127), r(128, 127), r(128, 127), 0));
+            shape->setOrigin(collideable->radius, collideable->radius);
+            entity.assign<Renderable>(shape);
         }
-    };
+    }
+    
+private:
+    sf::Vector2u size;
+    int count;
 };
 
 
-// Fades out the alpha value of any Renderable and Fadeable entity. Once the
-// object has completely faded out it is destroyed.
-struct FadeOutSystem : public ex::System<FadeOutSystem> {
+// Updates a body's position and rotation.
+struct BodySystem : public ex::System<BodySystem> {
     void update(ex::EntityManager &es, ex::EventManager &events, ex::TimeDelta dt) override {
-        ex::ComponentHandle<Fadeable> fade;
-        ex::ComponentHandle<Renderable> renderable;
-        for (ex::Entity entity : es.entities_with_components(fade, renderable)) {
-            fade->alpha -= fade->d * dt;
-            if (fade->alpha <= 0) {
-                entity.destroy();
-            } else {
-                sf::Color color = renderable->shape->getFillColor();
-                color.a = fade->alpha;
-                renderable->shape->setFillColor(color);
-            }
-        }
-    }
+        const float fdt = static_cast<float>(dt);
+        es.each<Body>([fdt](ex::Entity entity, Body &body) {
+            body.position += body.direction * fdt;
+            body.rotation += body.rotationd * fdt;
+            body.alpha = std::min(1.0f, body.alpha + fdt);
+        });
+    };
 };
 
 
@@ -134,15 +140,14 @@ public:
     explicit BounceSystem(sf::RenderTarget &target) : size(target.getSize()) {}
     
     void update(ex::EntityManager &es, ex::EventManager &events, ex::TimeDelta dt) override {
-        ex::ComponentHandle<Body> body;
-        for (ex::Entity entity : es.entities_with_components(body)) {
-            if (body->position.x + body->direction.x < 0 ||
-                body->position.x + body->direction.x >= size.x)
-                body->direction.x = -body->direction.x;
-            if (body->position.y + body->direction.y < 0 ||
-                body->position.y + body->direction.y >= size.y)
-                body->direction.y = -body->direction.y;
-        }
+        es.each<Body>([this](ex::Entity entity, Body &body) {
+            if (body.position.x + body.direction.x < 0 ||
+                body.position.x + body.direction.x >= size.x)
+                body.direction.x = -body.direction.x;
+            if (body.position.y + body.direction.y < 0 ||
+                body.position.y + body.direction.y >= size.y)
+                body.direction.y = -body.direction.y;
+        });
     }
     
 private:
@@ -187,15 +192,13 @@ private:
     }
     
     void collect(ex::EntityManager &entities) {
-        ex::ComponentHandle<Body> body;
-        ex::ComponentHandle<Collideable> collideable;
-        for (ex::Entity entity : entities.entities_with_components(body, collideable)) {
+        entities.each<Body, Collideable>([this](ex::Entity entity, Body &body, Collideable &collideable) {
             unsigned int
-            left = static_cast<int>(body->position.x - collideable->radius) / PARTITIONS,
-            top = static_cast<int>(body->position.y - collideable->radius) / PARTITIONS,
-            right = static_cast<int>(body->position.x + collideable->radius) / PARTITIONS,
-            bottom = static_cast<int>(body->position.y + collideable->radius) / PARTITIONS;
-            Candidate candidate {body->position, collideable->radius, entity};
+            left = static_cast<int>(body.position.x - collideable.radius) / PARTITIONS,
+            top = static_cast<int>(body.position.y - collideable.radius) / PARTITIONS,
+            right = static_cast<int>(body.position.x + collideable.radius) / PARTITIONS,
+            bottom = static_cast<int>(body.position.y + collideable.radius) / PARTITIONS;
+            Candidate candidate {body.position, collideable.radius, entity};
             unsigned int slots[4] = {
                 left + top * size.x,
                 right + top * size.x,
@@ -206,7 +209,7 @@ private:
             if (slots[0] != slots[1]) grid[slots[1]].push_back(candidate);
             if (slots[1] != slots[2]) grid[slots[2]].push_back(candidate);
             if (slots[2] != slots[3]) grid[slots[3]].push_back(candidate);
-        }
+        });
     }
     
     void collide(ex::EventManager &events) {
@@ -231,6 +234,46 @@ private:
 };
 
 
+// Fade out and then remove particles.
+class ParticleSystem : public ex::System<ParticleSystem> {
+public:
+    void update(ex::EntityManager &es, ex::EventManager &events, ex::TimeDelta dt) override {
+        es.each<Particle>([dt](ex::Entity entity, Particle &particle) {
+            particle.alpha -= particle.d * dt;
+            if (particle.alpha <= 0) {
+                entity.destroy();
+            } else {
+                particle.colour.a = particle.alpha;
+            }
+        });
+    }
+};
+
+
+// Renders all explosion particles efficiently as a quad vertex array.
+class ParticleRenderSystem : public ex::System<ParticleRenderSystem> {
+public:
+    explicit ParticleRenderSystem(sf::RenderTarget &target) : target(target) {}
+    
+    void update(ex::EntityManager &es, ex::EventManager &events, ex::TimeDelta dt) override {
+        sf::VertexArray vertices(sf::Quads);
+        es.each<Particle, Body>([&vertices](ex::Entity entity, Particle &particle, Body &body) {
+            const float r = particle.radius;
+            // Spin the particles.
+            sf::Transform transform;
+            transform.rotate(body.rotation);
+            vertices.append(sf::Vertex(body.position + transform.transformPoint(sf::Vector2f(-r, -r)), particle.colour));
+            vertices.append(sf::Vertex(body.position + transform.transformPoint(sf::Vector2f(r, -r)), particle.colour));
+            vertices.append(sf::Vertex(body.position + transform.transformPoint(sf::Vector2f(r, r)), particle.colour));
+            vertices.append(sf::Vertex(body.position + transform.transformPoint(sf::Vector2f(-r, r)), particle.colour));
+        });
+        target.draw(vertices);
+    }
+private:
+    sf::RenderTarget &target;
+};
+
+
 // For any two colliding bodies, destroys the bodies and emits a bunch of bodgy explosion particles.
 class ExplosionSystem : public ex::System<ExplosionSystem>, public ex::Receiver<ExplosionSystem> {
 public:
@@ -250,7 +293,7 @@ public:
         ex::ComponentHandle<Body> body = entity.component<Body>();
         ex::ComponentHandle<Renderable> renderable = entity.component<Renderable>();
         ex::ComponentHandle<Collideable> collideable = entity.component<Collideable>();
-        sf::Color colour = renderable->shape->getFillColor();
+        sf::Color colour = (*renderable)->getFillColor();
         colour.a = 200;
         
         float area = (M_PI * collideable->radius * collideable->radius) / 3.0;
@@ -260,18 +303,15 @@ public:
             float rotationd = r(720, 180);
             if (std::rand() % 2 == 0) rotationd = -rotationd;
             
+            float offset = r(collideable->radius, 1);
+            float angle = r(360) * M_PI / 180.0;
             particle.assign<Body>(
-                                  body->position + sf::Vector2f(r(collideable->radius * 2, -collideable->radius), r(collideable->radius * 2, -collideable->radius)),
-                                  body->direction + sf::Vector2f(r(50, -25), r(100, -50)),
+                                  body->position + sf::Vector2f(offset * cos(angle), offset * sin(angle)),
+                                  body->direction + sf::Vector2f(offset * 2 * cos(angle), offset * 2 * sin(angle)),
                                   rotationd);
             
             float radius = r(3, 1);
-            std::unique_ptr<sf::Shape> shape(new sf::RectangleShape(sf::Vector2f(radius * 2, radius * 2)));
-            shape->setFillColor(colour);
-            shape->setOrigin(radius, radius);
-            particle.assign<Renderable>(std::move(shape));
-            
-            particle.assign<Fadeable>(colour.a, radius / 2);
+            particle.assign<Particle>(colour, radius, radius / 2);
         }
     }
     
@@ -298,25 +338,30 @@ public:
     }
     
     void update(ex::EntityManager &es, ex::EventManager &events, ex::TimeDelta dt) override {
-        ex::ComponentHandle<Body> body;
-        ex::ComponentHandle<Renderable> renderable;
-        for (ex::Entity entity : es.entities_with_components(body, renderable)) {
-            renderable->shape->setPosition(body->position);
-            renderable->shape->setRotation(body->rotation);
-            target.draw(*renderable->shape.get());
-        }
+        es.each<Body, Renderable>([this](ex::Entity entity, Body &body, Renderable &renderable) {
+            sf::Color fillColor = renderable->getFillColor();
+            fillColor.a = sf::Uint8(body.alpha * 255);
+            renderable->setFillColor(fillColor);
+            renderable->setPosition(body.position);
+            renderable->setRotation(body.rotation);
+            target.draw(*renderable.get());
+        });
         last_update += dt;
+        frame_count++;
         if (last_update >= 0.5) {
             std::ostringstream out;
-            out << es.size() << " entities (" << static_cast<int>(1.0 / dt) << " fps)";
+            const double fps = frame_count / last_update;
+            out << es.size() << " entities (" << static_cast<int>(fps) << " fps)";
             text.setString(out.str());
             last_update = 0.0;
+            frame_count = 0.0;
         }
         target.draw(text);
     }
     
 private:
-    float last_update = 0.0;
+    double last_update = 0.0;
+    double frame_count = 0.0;
     sf::RenderTarget &target;
     sf::Text text;
 };
@@ -325,41 +370,19 @@ private:
 class Application : public ex::EntityX {
 public:
     explicit Application(sf::RenderTarget &target, sf::Font &font) {
+        systems.add<SpawnSystem>(target, 100);
         systems.add<BodySystem>();
-        systems.add<FadeOutSystem>();
         systems.add<BounceSystem>(target);
         systems.add<CollisionSystem>(target);
         systems.add<ExplosionSystem>();
+        systems.add<ParticleSystem>();
         systems.add<RenderSystem>(target, font);
+        systems.add<ParticleRenderSystem>(target);
         systems.configure();
-        
-        sf::Vector2u size = target.getSize();
-        for (int i = 0; i < 500; i++) {
-            ex::Entity entity = entities.create();
-            
-            // Mark as collideable (explosion particles will not be collideable).
-            ex::ComponentHandle<Collideable> collideable = entity.assign<Collideable>(r(10, 5));
-            
-            // "Physical" attributes.
-            entity.assign<Body>(
-                                sf::Vector2f(r(size.x), r(size.y)),
-                                sf::Vector2f(r(100, -50), r(100, -50)));
-            
-            // Shape to apply to entity.
-            std::unique_ptr<sf::Shape> shape(new sf::CircleShape(collideable->radius));
-            shape->setFillColor(sf::Color(r(128, 127), r(128, 127), r(128, 127)));
-            shape->setOrigin(collideable->radius, collideable->radius);
-            entity.assign<Renderable>(std::move(shape));
-        }
     }
     
     void update(ex::TimeDelta dt) {
-        systems.update<BodySystem>(dt);
-        systems.update<FadeOutSystem>(dt);
-        systems.update<BounceSystem>(dt);
-        systems.update<CollisionSystem>(dt);
-        systems.update<ExplosionSystem>(dt);
-        systems.update<RenderSystem>(dt);
+        systems.update_all(dt);
     }
 };
 
@@ -397,4 +420,6 @@ int ecs_main() {
         app.update(elapsed.asSeconds());
         window.display();
     }
+    
+    return 0;
 }
