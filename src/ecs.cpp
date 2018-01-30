@@ -103,8 +103,7 @@ public:
             collideable = entity.assign<Collideable>(r(10, 5));
             
             // "Physical" attributes.
-            entity.assign<Body>(
-                                sf::Vector2f(r(size.x), r(size.y)),
+            entity.assign<Body>(sf::Vector2f(r(size.x), r(size.y)),
                                 sf::Vector2f(r(100, -50), r(100, -50)));
             
             // Shape to apply to entity.
@@ -194,18 +193,22 @@ private:
     void collect(ex::EntityManager &entities) {
         entities.each<Body, Collideable>([this](ex::Entity entity, Body &body, Collideable &collideable) {
             unsigned int
-            left = static_cast<int>(body.position.x - collideable.radius) / PARTITIONS,
-            top = static_cast<int>(body.position.y - collideable.radius) / PARTITIONS,
-            right = static_cast<int>(body.position.x + collideable.radius) / PARTITIONS,
-            bottom = static_cast<int>(body.position.y + collideable.radius) / PARTITIONS;
-            Candidate candidate {body.position, collideable.radius, entity};
+                left    = static_cast<int>(body.position.x - collideable.radius) / PARTITIONS,
+                top     = static_cast<int>(body.position.y - collideable.radius) / PARTITIONS,
+                right   = static_cast<int>(body.position.x + collideable.radius) / PARTITIONS,
+                bottom  = static_cast<int>(body.position.y + collideable.radius) / PARTITIONS;
+            
+            Candidate candidate { body.position, collideable.radius, entity };
+            
             unsigned int slots[4] = {
-                left + top * size.x,
-                right + top * size.x,
+                left  + top    * size.x,
+                right + top    * size.x,
                 left  + bottom * size.x,
                 right + bottom * size.x,
             };
+            
             grid[slots[0]].push_back(candidate);
+            
             if (slots[0] != slots[1]) grid[slots[1]].push_back(candidate);
             if (slots[1] != slots[2]) grid[slots[2]].push_back(candidate);
             if (slots[2] != slots[3]) grid[slots[3]].push_back(candidate);
@@ -263,9 +266,9 @@ public:
             sf::Transform transform;
             transform.rotate(body.rotation);
             vertices.append(sf::Vertex(body.position + transform.transformPoint(sf::Vector2f(-r, -r)), particle.colour));
-            vertices.append(sf::Vertex(body.position + transform.transformPoint(sf::Vector2f(r, -r)), particle.colour));
-            vertices.append(sf::Vertex(body.position + transform.transformPoint(sf::Vector2f(r, r)), particle.colour));
-            vertices.append(sf::Vertex(body.position + transform.transformPoint(sf::Vector2f(-r, r)), particle.colour));
+            vertices.append(sf::Vertex(body.position + transform.transformPoint(sf::Vector2f( r, -r)), particle.colour));
+            vertices.append(sf::Vertex(body.position + transform.transformPoint(sf::Vector2f( r,  r)), particle.colour));
+            vertices.append(sf::Vertex(body.position + transform.transformPoint(sf::Vector2f(-r,  r)), particle.colour));
         });
         target.draw(vertices);
     }
