@@ -14,6 +14,5 @@ WORK_DIR=$(pwd)
 cmake ${ROOT_DIR} \
 	-DCMAKE_BUILD_TYPE=Debug \
 	-DCMAKE_INSTALL_PREFIX=$(pwd)/TARGET \
-	-DCMAKE_OSX_ARCHITECTURES=x86_64\;i386 \
 	-G "Unix Makefiles"
-make -j12
+make VERBOSE=1
