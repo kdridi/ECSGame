@@ -294,7 +294,7 @@ public:
         text.setFont(font);
         text.setPosition(sf::Vector2f(2, 2));
         text.setCharacterSize(18);
-        text.setColor(sf::Color::White);
+        text.setFillColor(sf::Color::White);
     }
     
     void update(ex::EntityManager &es, ex::EventManager &events, ex::TimeDelta dt) override {
